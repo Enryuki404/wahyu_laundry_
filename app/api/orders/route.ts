@@ -24,15 +24,17 @@ async function requireAuth() {
 }
 
 // Zod schema — ganti validasi PHP di OrderService/save_order
+// FIX: use coerce.number untuk handle customerId string vs int & weight string dari JSON / FormData
+// dirtLevelId null untuk ST tetap allowed (schema optional nullable)
 const createOrderSchema = z
   .object({
-    customerId: z.number().int().positive("customerId harus dipilih"),
+    customerId: z.coerce.number().int().positive("customerId harus dipilih"),
     serviceType: z.enum(["CC", "ST", "CS"]),
-    weight: z.number().positive("weight harus >0").max(100, "weight maksimal 100kg"),
+    weight: z.coerce.number().positive("weight harus >0").max(100, "weight maksimal 100kg"),
     isExpress: z.boolean().optional().default(false),
     isDelivery: z.boolean().optional().default(false),
-    dirtLevelId: z.number().int().positive().optional().nullable(),
-    clothingTypeId: z.number().int().positive().optional().nullable(),
+    dirtLevelId: z.coerce.number().int().positive().optional().nullable(),
+    clothingTypeId: z.coerce.number().int().positive().optional().nullable(),
     specialNotes: z.string().max(500).optional().nullable(),
   })
   .superRefine((data, ctx) => {
@@ -128,34 +130,34 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAuth();
+  const auth = await requireAuth(); // cek operatorId dari JWT (getCurrentUser equivalent)
   if (!auth) {
-    return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ ok: false, success: false, message: "Unauthorized" }, { status: 401 });
   }
-  // only admin and operator should create; owner blocked but allow admin
+  // only admin and operator should create; owner also allowed for flexibility — align with middleware allow admin
   if (auth.role !== "admin" && auth.role !== "operator" && auth.role !== "owner") {
-    return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    return NextResponse.json({ ok: false, success: false, message: "Forbidden" }, { status: 403 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ success: false, message: "Body JSON tidak valid" }, { status: 400 });
+    return NextResponse.json({ ok: false, success: false, message: "Body JSON tidak valid" }, { status: 400 });
   }
 
   const parsed = createOrderSchema.safeParse(body);
   if (!parsed.success) {
     const msg = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    return NextResponse.json({ success: false, message: msg, issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json({ ok: false, success: false, message: msg, issues: parsed.error.issues }, { status: 400 });
   }
 
   const { customerId, serviceType, weight, isExpress, isDelivery, dirtLevelId, clothingTypeId, specialNotes } = parsed.data;
 
-  // Validate customer exists
+  // Validate customer exists — cek customerId exists (int vs string handled via coerce)
   const customer = await prisma.customer.findUnique({ where: { id: customerId } });
   if (!customer) {
-    return NextResponse.json({ success: false, message: `Customer dengan ID ${customerId} tidak ditemukan` }, { status: 404 });
+    return NextResponse.json({ ok: false, success: false, message: `Customer dengan ID ${customerId} tidak ditemukan` }, { status: 404 });
   }
 
   // Validate dirt level & clothing type if needed
@@ -167,8 +169,8 @@ export async function POST(req: NextRequest) {
       prisma.masterTingkatKotor.findUnique({ where: { id: dirtLevelId! } }),
       prisma.masterJenisPakaian.findUnique({ where: { id: clothingTypeId! } }),
     ]);
-    if (!dirt) return NextResponse.json({ success: false, message: "dirtLevel tidak ditemukan" }, { status: 404 });
-    if (!clothing) return NextResponse.json({ success: false, message: "clothingType tidak ditemukan" }, { status: 404 });
+    if (!dirt) return NextResponse.json({ ok: false, success: false, message: "dirtLevel tidak ditemukan" }, { status: 404 });
+    if (!clothing) return NextResponse.json({ ok: false, success: false, message: "clothingType tidak ditemukan" }, { status: 404 });
     dirtData = {
       tambahanDeterjen: Number(dirt.tambahanDeterjen),
       pemutih: dirt.pemutih as string,
@@ -183,7 +185,7 @@ export async function POST(req: NextRequest) {
 
   const masterHarga = await prisma.masterHarga.findFirst({ where: { layanan: kodeLayanan } });
   if (!masterHarga) {
-    return NextResponse.json({ success: false, message: `Harga layanan ${kodeLayanan} tidak ditemukan` }, { status: 404 });
+    return NextResponse.json({ ok: false, success: false, message: `Harga layanan ${kodeLayanan} tidak ditemukan` }, { status: 404 });
   }
 
   // Hitung cost — hargaPerKg * weight + tambahan flat 500 per kebutuhan
@@ -212,7 +214,7 @@ export async function POST(req: NextRequest) {
     }
   }
   if (!noPesanan) {
-    return NextResponse.json({ success: false, message: "Gagal generate nomor pesanan, coba lagi" }, { status: 500 });
+    return NextResponse.json({ ok: false, success: false, message: "Gagal generate nomor pesanan, coba lagi" }, { status: 500 });
   }
 
   const chemicals = calculateChemicals(serviceType, weight, dirtData, clothingDeterjenType);
@@ -280,7 +282,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
+        ok: true,
         success: true,
+        noPesanan,
         message: "Order berhasil disimpan",
         data: {
           noPesanan,
@@ -299,6 +303,6 @@ export async function POST(req: NextRequest) {
   } catch (e: unknown) {
     console.error("[POST /api/orders] txn error:", e);
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ success: false, message: "Gagal menyimpan order: " + msg }, { status: 500 });
+    return NextResponse.json({ ok: false, success: false, message: "Gagal menyimpan order: " + msg }, { status: 500 });
   }
 }

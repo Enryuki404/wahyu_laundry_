@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type MasterHarga = { id: number; layanan: string; hargaPerKg: number | string };
 type MasterJenis = { id: number; nama: string; deterjenType: string; deskripsi: string | null };
@@ -53,6 +54,7 @@ function rupiah(n: number) {
 }
 
 export default function InputOrderForm({ masterHarga, masterJenis, masterTingkat }: Props) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<CustomerHit[]>([]);
   const [selected, setSelected] = useState<CustomerHit | null>(null);
@@ -194,12 +196,17 @@ export default function InputOrderForm({ masterHarga, masterJenis, masterTingkat
     setSubmitting(true);
     setMsg(null);
     try {
+      // Pastikan weight parseFloat benar — raw string boleh "5,5" atau "5.0" -> normalisasi
+      const normalizedWeight = parseFloat(String(weight).replace(",", "."));
+      if (!normalizedWeight || normalizedWeight <= 0 || Number.isNaN(normalizedWeight)) {
+        throw new Error("Berat tidak valid");
+      }
       const payload = {
-        customerId: selected!.id,
+        customerId: Number(selected!.id),
         serviceType,
-        weight: parseFloat(weight),
-        isExpress,
-        isDelivery,
+        weight: normalizedWeight,
+        isExpress: !!isExpress,
+        isDelivery: !!isDelivery,
         dirtLevelId: serviceType === "ST" ? null : Number(dirtLevelId),
         clothingTypeId: serviceType === "ST" ? null : Number(clothingTypeId),
         specialNotes: notes || null,
@@ -209,13 +216,21 @@ export default function InputOrderForm({ masterHarga, masterJenis, masterTingkat
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const j = await res.json();
-      if (!res.ok || !j.success) {
-        throw new Error(j.message || "Gagal menyimpan order");
+      const j = await res.json().catch(() => ({}));
+      // handle both legacy {success} and new {ok}
+      const ok = res.ok && (j.success || j.ok);
+      if (!ok) {
+        throw new Error(j.message || j.error || "Gagal menyimpan order");
       }
-      setCreatedNo(j.data.noPesanan);
-      setMsg({ type: "ok", text: `Order berhasil: ${j.data.noPesanan} — ${rupiah(j.data.cost)}` });
-      // reset weight etc but keep customer? optionally clear
+      const noPesanan = j.data?.noPesanan ?? j.noPesanan ?? j.data?.no_pesanan;
+      const cost = j.data?.cost ?? j.cost ?? 0;
+      setCreatedNo(noPesanan ?? null);
+      setMsg({ type: "ok", text: `Order berhasil: ${noPesanan} — ${rupiah(Number(cost))}` });
+      // redirect ke /admin/pesanan setelah sukses (delay 700ms agar user lihat toast)
+      setTimeout(() => {
+        router.push("/admin/pesanan");
+        router.refresh();
+      }, 700);
     } catch (err: unknown) {
       const m = err instanceof Error ? err.message : String(err);
       setMsg({ type: "err", text: m });

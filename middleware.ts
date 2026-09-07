@@ -124,6 +124,13 @@ export async function middleware(req: NextRequest) {
 
     // API role guard similarly: if /api/admin etc (if you prefix APIs by role)
     // For now generic /api requires auth but not role-specific, except above.
+    // Explicit: /api/orders & /api/customers/search allow for admin (jangan block) — all authenticated roles pass
+    if (pathname.startsWith("/api/orders") || pathname.startsWith("/api/customers/search")) {
+      if (["admin", "operator", "owner"].includes(role)) {
+        // allow — no redirect, just continue to route handler which does its own role check
+      }
+      return NextResponse.next();
+    }
 
     // Refresh: re-issue token with new exp (sliding 8h) and set cookie
     // Do not refresh on every request too aggressively? We'll refresh if token exp < 4h remaining.
