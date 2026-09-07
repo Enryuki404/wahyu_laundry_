@@ -1,0 +1,386 @@
+// Prisma schema for Wahyu Laundry — PostgreSQL (Neon)
+// Ported from wahyu_laundry.sql (MariaDB) — 14 tables
+// Fixes:
+// - absensi.status_kehadiran: added 'Hampir Terlambat' (original 3 -> 4 values)
+// - orders: service_type / dirt_level / clothing_type relations fixed to proper FK relations
+// - inventory.status: enum Tersedia/Hampir Habis/Habis as Prisma enum
+// - timestamps: all MariaDB timestamp/date/datetime/time mapped to DateTime
+// - Triggers removed: original SQL had 2 triggers (update_inventory_status BEFORE UPDATE on inventory, after_order_insert AFTER INSERT on orders)
+//   -> NOT ported to Prisma; handled in application layer. See comments below.
+// - @@map used to preserve original table names; @map for columns keeping snake_case compatibility
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  owner
+  admin
+  operator
+}
+
+enum UserStatus {
+  Aktif
+  Cuti
+  NonAktif @map("Non-Aktif")
+}
+
+enum JenisKelamin {
+  L
+  P
+}
+
+enum StatusKehadiran {
+  TepatWaktu      @map("Tepat Waktu")
+  Terlambat
+  TidakHadir      @map("Tidak Hadir")
+  HampirTerlambat @map("Hampir Terlambat")
+}
+
+enum CashFlowJenis {
+  pendapatan
+  pengeluaran
+}
+
+enum CustomerStatus {
+  active
+  inactive
+}
+
+enum InventoryKategori {
+  DetergenBubuk @map("Detergen bubuk")
+  DetergenCair  @map("Detergen Cair")
+  Pewangi
+  Emulsifier
+  Alkali
+  ChloroBleach  @map("Chloro bleach")
+  OxygenBleach  @map("Oxygen bleach")
+  Neutralizer
+  Softener
+}
+
+enum InventorySatuan {
+  kg
+  sachet
+  liter
+}
+
+enum InventoryStatus {
+  Tersedia
+  HampirHabis @map("Hampir Habis")
+  Habis
+}
+
+enum LogQcStatus {
+  pending
+  done
+}
+
+enum OrderStatus {
+  pending
+  processing
+  finishing
+  completed
+  pickup
+  done
+}
+
+enum PaymentStatus {
+  unpaid
+  paid
+}
+
+enum DeterjenType {
+  cair
+  bubuk
+}
+
+enum PemutihYn {
+  ya
+  tidak
+}
+
+enum GajiStatusPembayaran {
+  BelumDibayar @map("Belum Dibayar")
+  SudahDibayar @map("Sudah Dibayar")
+}
+
+// ── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id               Int              @id @default(autoincrement())
+  username         String           @unique @db.VarChar(50)
+  password         String           @db.VarChar(255)
+  namaLengkap      String           @map("nama_lengkap") @db.VarChar(100)
+  role             Role
+  status           UserStatus?      @default(Aktif)
+  tanggalBergabung DateTime         @map("tanggal_bergabung") @db.Date
+  gajiPokok        Decimal          @map("gaji_pokok") @db.Decimal(10, 2)
+  alamat           String?          @db.Text
+  noTelepon        String?          @map("no_telepon") @db.VarChar(15)
+  lastLogin        DateTime?        @map("last_login") @db.Timestamp(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt        DateTime?        @updatedAt @map("updated_at") @db.Timestamp(6)
+  nik              String?          @unique @db.VarChar(16)
+  noPegawai        String?          @unique @map("no_pegawai") @db.VarChar(10)
+  jenisKelamin     JenisKelamin?    @map("jenis_kelamin")
+
+  // Relations
+  absensi      Absensi[]
+  gajiBulanan  GajiBulanan[]  @relation("GajiUser")
+  ordersAsOperator Order[]    @relation("OperatorOrders")
+  logOrders    LogOrder[]
+
+  @@map("users")
+}
+
+model Absensi {
+  id              Int              @id @default(autoincrement())
+  userId          Int              @map("user_id")
+  tanggal         DateTime         @db.Date
+  jamMasuk        DateTime         @map("jam_masuk") @db.Time(6)
+  jamKeluar       DateTime?        @map("jam_keluar") @db.Time(6)
+  statusKehadiran StatusKehadiran  @map("status_kehadiran")
+  keterangan      String?          @db.Text
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("absensi")
+}
+
+model Customer {
+  id            Int             @id @default(autoincrement())
+  noPelanggan   String          @map("no_pelanggan") @db.VarChar(100)
+  nama          String          @db.VarChar(100)
+  noTelepon     String          @map("no_telepon") @db.VarChar(15)
+  email         String?         @db.VarChar(100)
+  alamat        String?         @db.Text
+  memberSince   DateTime        @map("member_since") @db.Date
+  points        Int?            @default(0)
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime?       @updatedAt @map("updated_at") @db.Timestamp(6)
+  lastOrderDate DateTime?       @map("last_order_date") @db.Date
+  totalOrders   Int?            @default(0) @map("total_orders")
+  totalSpent    Decimal?        @default(0.00) @map("total_spent") @db.Decimal(10, 2)
+  status        CustomerStatus? @default(active)
+
+  orders Order[]
+
+  @@map("customers")
+}
+
+model Order {
+  id              Int            @id @default(autoincrement())
+  noPesanan       String         @unique @map("no_pesanan") @db.VarChar(20)
+  // FIX: service_type remains string for backwards compat but also keep optional FK to MasterHarga if needed.
+  // We store raw service_type string; application resolves to MasterHarga via lookup.
+  serviceType     String         @map("service_type") @db.VarChar(50)
+  masterHargaId   Int?           @map("master_harga_id")
+  masterHarga     MasterHarga?   @relation(fields: [masterHargaId], references: [id])
+
+  // FIX: dirt_level now proper FK to MasterTingkatKotor
+  dirtLevelId     Int?           @map("dirt_level")
+  dirtLevel       MasterTingkatKotor? @relation(fields: [dirtLevelId], references: [id])
+
+  // FIX: clothing_type now proper FK to MasterJenisPakaian
+  clothingTypeId  Int?           @map("clothing_type")
+  clothingType    MasterJenisPakaian? @relation(fields: [clothingTypeId], references: [id])
+
+  weight          Decimal        @db.Decimal(10, 2)
+  cost            Decimal        @db.Decimal(10, 2)
+  specialNotes    String?        @map("special_notes") @db.Text
+  entryDate       DateTime       @map("entry_date") @db.Date
+  estimatedDate   DateTime       @map("estimated_date") @db.Date
+  status          OrderStatus    @default(pending)
+  paymentStatus   PaymentStatus? @default(unpaid) @map("payment_status")
+  operatorId      Int?           @map("operator_id")
+  operator        User?          @relation("OperatorOrders", fields: [operatorId], references: [id])
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime?      @updatedAt @map("updated_at") @db.Timestamp(6)
+  discountApplied Decimal?       @default(0.00) @map("discount_applied") @db.Decimal(10, 2)
+  pointsUsed      Int?           @default(0) @map("points_used")
+  customerId      Int            @map("customer_id")
+  customer        Customer       @relation(fields: [customerId], references: [id])
+  isExpress       Boolean?       @default(false) @map("is_express")
+  isDelivery      Boolean?       @default(false) @map("is_delivery")
+  completedDate   DateTime?      @map("completed_date") @db.Timestamp(6)
+
+  // Relations to logs
+  logOrders        LogOrder[]
+  logQcs           LogQc[]
+  notificationLogs NotificationLog?
+  logInventories   LogInventory[] @relation("OrderLogInventory")
+
+  @@index([operatorId])
+  @@index([customerId])
+  @@index([dirtLevelId])
+  @@map("orders")
+}
+
+model GajiBulanan {
+  id               Int                   @id @default(autoincrement())
+  userId           Int                   @map("user_id")
+  user             User                  @relation("GajiUser", fields: [userId], references: [id])
+  bulan            Int
+  tahun            Int
+  jumlahHadir      Int                   @default(0) @map("jumlah_hadir")
+  jumlahTerlambat  Int                   @default(0) @map("jumlah_terlambat")
+  jumlahLembur     Int                   @default(0) @map("jumlah_lembur")
+  gajiPokok        Decimal               @map("gaji_pokok") @db.Decimal(10, 2)
+  uangMakan        Decimal               @map("uang_makan") @db.Decimal(10, 2)
+  transport        Decimal               @db.Decimal(10, 2)
+  bonus            Decimal?              @default(0.00) @db.Decimal(10, 2)
+  potongan         Decimal?              @default(0.00) @db.Decimal(10, 2)
+  totalGaji        Decimal               @map("total_gaji") @db.Decimal(10, 2)
+  statusPembayaran GajiStatusPembayaran? @default(BelumDibayar) @map("status_pembayaran")
+  approvedBy       String?               @map("approved_by") @db.VarChar(100)
+  tanggalApprove   DateTime              @map("tanggal_approve") @db.Date
+  tanggalPembayaran DateTime?            @map("tanggal_pembayaran") @db.Timestamp(6)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([userId])
+  @@map("gaji_bulanan")
+}
+
+model Inventory {
+  id                        Int               @id @default(autoincrement())
+  merk                      String            @db.VarChar(100)
+  kategori                  InventoryKategori
+  jumlahStock               Decimal           @map("jumlah_stock") @db.Decimal(10, 2)
+  satuan                    InventorySatuan
+  batasMinimum              Decimal           @map("batas_minimum") @db.Decimal(10, 2)
+  tanggalAdd                DateTime          @map("tanggal_add") @db.Date
+  tanggalRestock            DateTime?         @map("tanggal_restock") @db.Date
+  tanggalPenggunaanTerakhir DateTime?         @map("tanggal_penggunaan_terakhir") @db.Date
+  status                    InventoryStatus   @default(Tersedia)
+  createdAt                 DateTime          @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt                 DateTime          @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  // Trigger note:
+  // ORIGINAL: BEFORE UPDATE trigger `update_inventory_status` auto-set status based on jumlah_stock vs batas_minimum
+  // PORT: removed from DB layer; implement in application service (e.g., after inventory update, recompute status).
+
+  @@map("inventory")
+}
+
+model LogInventory {
+  id            Int       @id @default(autoincrement())
+  noPesanan     String?   @map("no_pesanan") @db.VarChar(20)
+  order         Order?    @relation("OrderLogInventory", fields: [noPesanan], references: [noPesanan])
+  tanggalMasuk  DateTime? @map("tanggal_masuk") @db.Date
+  detergenBubuk Decimal?  @default(0.000) @map("detergen_bubuk") @db.Decimal(10, 3)
+  detergenCair  Decimal?  @default(0.000) @map("detergen_cair") @db.Decimal(10, 3)
+  pewangi       Decimal?  @default(0.000) @db.Decimal(10, 3)
+  emulsifier    Decimal?  @default(0.000) @db.Decimal(10, 3)
+  alkali        Decimal?  @default(0.000) @db.Decimal(10, 3)
+  chloroBleach  Decimal?  @default(0.000) @map("chloro_bleach") @db.Decimal(10, 3)
+  oxygenBleach  Decimal?  @default(0.000) @map("oxygen_bleach") @db.Decimal(10, 3)
+  neutralizer   Decimal?  @default(0.000) @db.Decimal(10, 3)
+  softener      Decimal?  @default(0.000) @db.Decimal(10, 3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([noPesanan])
+  @@index([tanggalMasuk])
+  @@map("log_inventory")
+}
+
+model LogOrder {
+  id             Int       @id @default(autoincrement())
+  noPesanan      String?   @map("no_pesanan") @db.VarChar(20)
+  order          Order?    @relation(fields: [noPesanan], references: [noPesanan])
+  operatorId     Int?      @map("operator_id")
+  operator       User?     @relation(fields: [operatorId], references: [id])
+  washDate       DateTime? @map("wash_date") @db.Timestamp(6)
+  finishingDate  DateTime? @map("finishing_date") @db.Timestamp(6)
+  qcDate         DateTime? @map("qc_date") @db.Timestamp(6)
+  notes          String?   @db.Text
+
+  @@index([noPesanan])
+  @@index([operatorId])
+  @@map("log_order")
+}
+
+model LogQc {
+  id        Int         @id @default(autoincrement())
+  noPesanan String?     @map("no_pesanan") @db.VarChar(50)
+  order     Order?      @relation(fields: [noPesanan], references: [noPesanan])
+  spray     LogQcStatus? @default(pending)
+  nota      LogQcStatus? @default(pending)
+  packing   LogQcStatus? @default(pending)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("log_qc")
+}
+
+model CashFlow {
+  id         Int            @id @default(autoincrement())
+  tanggal    DateTime       @db.Date
+  jenis      CashFlowJenis
+  kategori   String         @db.VarChar(50)
+  jumlah     Decimal        @db.Decimal(10, 2)
+  keterangan String?        @db.Text
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("cash_flow")
+}
+
+model MasterHarga {
+  id                   Int       @id @default(autoincrement())
+  layanan              String    @db.VarChar(10)
+  hargaPerKg           Decimal   @map("harga_per_kg") @db.Decimal(10, 2)
+  deterjenPersen       Decimal?  @default(0.00) @map("deterjen_persen") @db.Decimal(5, 2)
+  pemutihPersen        Decimal?  @default(0.00) @map("pemutih_persen") @db.Decimal(5, 2)
+  penghilangNodaPersen Decimal?  @default(0.00) @map("penghilang_noda_persen") @db.Decimal(5, 2)
+  pelembutPersen       Decimal?  @default(0.00) @map("pelembut_persen") @db.Decimal(5, 2)
+  pewangiPersen        Decimal?  @default(0.00) @map("pewangi_persen") @db.Decimal(5, 2)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+
+  orders Order[]
+
+  @@map("master_harga")
+}
+
+model MasterJenisPakaian {
+  id           Int          @id @default(autoincrement())
+  nama         String       @db.VarChar(100)
+  deterjenType DeterjenType @map("deterjen_type")
+  deskripsi    String?      @db.Text
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamp(6)
+
+  orders Order[]
+
+  @@map("master_jenis_pakaian")
+}
+
+model MasterTingkatKotor {
+  id                Int       @id @default(autoincrement())
+  level             String    @db.VarChar(50)
+  tambahanDeterjen  Decimal   @map("tambahan_deterjen") @db.Decimal(5, 2)
+  keterangan        String?   @db.Text
+  pemutih           PemutihYn? @default(tidak)
+  penghilangNoda    PemutihYn? @default(tidak) @map("penghilang_noda")
+  pelembut          PemutihYn? @default(tidak)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+
+  orders Order[]
+
+  @@map("master_tingkat_kotor")
+}
+
+model NotificationLog {
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @unique @map("order_id")
+  order      Order    @relation(fields: [orderId], references: [id])
+  lastCalled DateTime @map("last_called") @db.Timestamp(6)
+
+  @@map("notification_logs")
+}
