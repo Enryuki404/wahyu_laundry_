@@ -53,6 +53,7 @@ function getNavGroups(role: string): NavGroup[] {
         header: "Laporan",
         items: [
           { href: "/admin/pesanan", label: "Daftar Pesanan", icon: "◎" },
+          { href: "/admin/pesanan/baru", label: "Input Order", icon: "＋" },
           { href: "/admin/pesanan-masuk", label: "Pesanan Masuk", icon: "◎" },
         ],
       },

@@ -79,8 +79,8 @@ export default async function AdminPage() {
             <div className="text-sm text-[#94A3B8] font-medium">Ringkasan operasional hari ini — {todayId}</div>
           </div>
           <div className="flex gap-2">
-            <a href="#" className="px-4 py-2 rounded-full bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] text-white font-bold text-sm shadow-[0_8px_16px_rgba(37,99,235,.2)] hover:-translate-y-px transition">＋ Pesanan Baru</a>
-            <a href="#" className="px-4 py-2 rounded-full bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition">＋ Pelanggan Baru</a>
+            <a href="/admin/pesanan/baru" className="px-4 py-2 rounded-full bg-gradient-to-br from-[#2563EB] to-[#1D4ED8] text-white font-bold text-sm shadow-[0_8px_16px_rgba(37,99,235,.2)] hover:-translate-y-px transition">＋ Pesanan Baru</a>
+            <a href="/admin/pelanggan/baru" className="px-4 py-2 rounded-full bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition">＋ Pelanggan Baru</a>
           </div>
         </div>
       </div>
@@ -167,7 +167,7 @@ export default async function AdminPage() {
       <div className="bg-white rounded-[16px] shadow-[0_8px_28px_rgba(15,23,42,.06)] border border-slate-100 overflow-hidden">
         <div className="flex justify-between items-center px-5 py-4 border-b border-slate-100">
           <h3 className="font-extrabold text-[#1E293B] flex items-center gap-2">📋 Daftar Pesanan Hari Ini</h3>
-          <a href="#" className="text-xs font-bold border border-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-50 transition">Lihat Semua ›</a>
+          <a href="/admin/pesanan" className="text-xs font-bold border border-slate-200 px-3 py-1.5 rounded-full hover:bg-slate-50 transition">Lihat Semua ›</a>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
