@@ -26,23 +26,23 @@ function getNavGroups(role: string): NavGroup[] {
       {
         header: "Laporan",
         items: [
-          { href: "/owner", label: "Transaksi", icon: "◎" },
-          { href: "/owner", label: "Keuangan", icon: "◎" },
-          { href: "/owner", label: "Pertumbuhan Pelanggan", icon: "◎" },
-          { href: "/owner", label: "Stock", icon: "◎" },
+          { href: "/owner/transaksi", label: "Transaksi", icon: "◎" },
+          { href: "/owner/keuangan", label: "Keuangan", icon: "◎" },
+          { href: "/owner/pelanggan", label: "Pertumbuhan Pelanggan", icon: "◎" },
+          { href: "/owner/stock", label: "Stock", icon: "◎" },
         ],
       },
       {
         header: "SDM",
         items: [
-          { href: "/owner", label: "Data Pegawai", icon: "◎" },
-          { href: "/owner", label: "Absensi", icon: "◎" },
-          { href: "/owner", label: "Manajemen Gaji", icon: "◎" },
+          { href: "/owner/pegawai", label: "Data Pegawai", icon: "◎" },
+          { href: "/owner/absensi", label: "Absensi", icon: "◎" },
+          { href: "/owner/gaji", label: "Manajemen Gaji", icon: "◎" },
         ],
       },
       {
         header: "Setting",
-        items: [{ href: "/owner", label: "Harga Layanan", icon: "◎" }],
+        items: [{ href: "/owner/harga", label: "Harga Layanan", icon: "◎" }],
       },
     ];
   }
@@ -52,24 +52,24 @@ function getNavGroups(role: string): NavGroup[] {
       {
         header: "Laporan",
         items: [
-          { href: "/admin", label: "Daftar Pesanan", icon: "◎" },
-          { href: "/admin", label: "Pesanan Masuk", icon: "◎" },
+          { href: "/admin/pesanan", label: "Daftar Pesanan", icon: "◎" },
+          { href: "/admin/pesanan-masuk", label: "Pesanan Masuk", icon: "◎" },
         ],
       },
       {
         header: "SDM",
         items: [
-          { href: "/admin", label: "Daftar Pelanggan", icon: "◎" },
-          { href: "/admin", label: "Pendaftaran Pelanggan", icon: "◎" },
-          { href: "/admin", label: "Daftar Stock", icon: "◎" },
-          { href: "/admin", label: "History Penggunaan", icon: "◎" },
+          { href: "/admin/pelanggan", label: "Daftar Pelanggan", icon: "◎" },
+          { href: "/admin/pelanggan/baru", label: "Pendaftaran Pelanggan", icon: "◎" },
+          { href: "/admin/stock", label: "Daftar Stock", icon: "◎" },
+          { href: "/admin/history", label: "History Penggunaan", icon: "◎" },
         ],
       },
       {
         header: "Setting",
         items: [
-          { href: "/admin", label: "Profile", icon: "◎" },
-          { href: "/admin", label: "Tingkat Kotor", icon: "◎" },
+          { href: "/admin/profile", label: "Profile", icon: "◎" },
+          { href: "/admin/tingkat-kotor", label: "Tingkat Kotor", icon: "◎" },
         ],
       },
     ];
@@ -80,16 +80,16 @@ function getNavGroups(role: string): NavGroup[] {
       header: "Utama",
       items: [
         { href: "/operator", label: "Dashboard", icon: "◈" },
-        { href: "/operator", label: "Riwayat Update", icon: "◎" },
+        { href: "/operator/riwayat", label: "Riwayat Update", icon: "◎" },
       ],
     },
     {
       header: "Laporan",
-      items: [{ href: "/operator", label: "Produksi Harian", icon: "◎" }],
+      items: [{ href: "/operator/produksi", label: "Produksi Harian", icon: "◎" }],
     },
     {
       header: "SDM",
-      items: [{ href: "/operator", label: "Setting Akun", icon: "◎" }],
+      items: [{ href: "/operator/akun", label: "Setting Akun", icon: "◎" }],
     },
   ];
 }
@@ -114,14 +114,21 @@ export default function DashboardShell({
     year: "numeric",
   });
 
-  const isActive = (href: string, label: string) => {
-    // Dashboard exact active, others generic
-    if (label === "Dashboard" && href === pathname) return true;
-    if (pathname === href && label === "Dashboard") return true;
-    // For demo, only Dashboard gets active state; keep logic simple
-    if (label === "Dashboard") return pathname === href;
+  const isActive = (href: string) => {
+    if (pathname === href) return true;
+    if (pathname.startsWith(href + "/")) return true;
     return false;
   };
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+    } catch {}
+    window.location.href = "/login";
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex">
@@ -183,7 +190,7 @@ export default function DashboardShell({
               </div>
               <ul className="space-y-1">
                 {g.items.map((it) => {
-                  const active = isActive(it.href, it.label);
+                  const active = isActive(it.href);
                   return (
                     <li key={it.label}>
                       <Link
@@ -272,12 +279,19 @@ export default function DashboardShell({
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{role}</div>
                     </div>
                     <div className="px-3 py-2 text-xs font-semibold text-slate-500">Halo, {user?.namaLengkap ?? "Pengguna"} 👋</div>
-                    <form action="/api/auth/logout" method="post">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 transition flex items-center gap-2"
+                    >
+                      <span>↪</span> Logout
+                    </button>
+                    {/* Fallback for no-JS: traditional form POST will now redirect via server Accept:text/html -> 302 /login */}
+                    <form action="/api/auth/logout" method="post" className="mt-1">
                       <button
                         type="submit"
-                        className="w-full text-left px-3 py-2 rounded-xl text-sm font-bold text-red-600 hover:bg-red-50 transition flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-50 transition flex items-center gap-2"
                       >
-                        <span>↪</span> Logout
+                        Logout (POST form)
                       </button>
                     </form>
                     <a

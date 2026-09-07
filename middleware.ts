@@ -84,7 +84,13 @@ export async function middleware(req: NextRequest) {
       url.pathname = "/login";
       url.searchParams.set("error", "Sesi berakhir, silakan login kembali.");
       const res = NextResponse.redirect(url);
-      res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+      res.cookies.set(COOKIE_NAME, "", {
+        path: "/",
+        maxAge: 0,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
       return res;
     }
 

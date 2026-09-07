@@ -56,6 +56,51 @@ function timeStringToDate(timeStr: string): Date {
   return new Date(`1970-01-01T${timeStr}.000Z`);
 }
 
+function wantsHtmlRedirect(req: NextRequest): boolean {
+  const accept = req.headers.get("accept") || "";
+  const secFetchMode = req.headers.get("sec-fetch-mode") || "";
+  const contentType = req.headers.get("content-type") || "";
+  // Browser form POST sends text/html, or navigation request
+  if (accept.includes("text/html")) return true;
+  if (secFetchMode === "navigate") return true;
+  if (contentType.includes("application/x-www-form-urlencoded")) return true;
+  return false;
+}
+
+function clearCookieAndRedirect(req: NextRequest, url: string = "/login") {
+  const res = NextResponse.redirect(new URL(url, req.url), 302);
+  res.cookies.set(COOKIE_NAME, "", {
+    path: "/",
+    maxAge: 0,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+  // also via next/headers for safety (will be merged)
+  try {
+    cookies().set(COOKIE_NAME, "", {
+      path: "/",
+      maxAge: 0,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+  } catch {}
+  return res;
+}
+
+function clearCookieHeader() {
+  try {
+    cookies().set(COOKIE_NAME, "", {
+      path: "/",
+      maxAge: 0,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+  } catch {}
+}
+
 export async function POST(req: NextRequest) {
   const url = req.nextUrl;
   const isCheck = url.searchParams.get("check") === "1" || url.searchParams.get("check_duration") === "1";
@@ -70,22 +115,25 @@ export async function POST(req: NextRequest) {
   const shouldCheckOnly = isCheck || bodyCheck;
 
   const user = await getUserFromCookies();
+  const wantsHtml = wantsHtmlRedirect(req);
 
   // If no user or owner, just clear cookie
   if (!user) {
-    cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    clearCookieHeader();
     if (shouldCheckOnly) {
       return NextResponse.json({ message: "Tidak ada sesi aktif", type: "info" });
     }
+    if (wantsHtml) return clearCookieAndRedirect(req);
     return NextResponse.json({ ok: true, message: "Logged out" });
   }
 
   if (user.role === "owner") {
     // owner has no absensi
-    cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    clearCookieHeader();
     if (shouldCheckOnly) {
       return NextResponse.json({ message: "Owner tidak memiliki absensi", type: "info" });
     }
+    if (wantsHtml) return clearCookieAndRedirect(req);
     return NextResponse.json({ ok: true, message: "Logged out (owner)" });
   }
 
@@ -107,10 +155,11 @@ export async function POST(req: NextRequest) {
 
     if (!absensi) {
       // No active absensi today
-      cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+      clearCookieHeader();
       if (shouldCheckOnly) {
         return NextResponse.json({ message: "Tidak ada absensi aktif hari ini", type: "info" });
       }
+      if (wantsHtml) return clearCookieAndRedirect(req);
       return NextResponse.json({ ok: true, message: "Logged out - no absensi" });
     }
 
@@ -152,7 +201,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    clearCookieHeader();
+    if (wantsHtml) return clearCookieAndRedirect(req);
     return NextResponse.json({
       ok: true,
       message: "Logout berhasil",
@@ -162,7 +212,8 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     console.error("[logout POST] error:", e);
-    cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
+    clearCookieHeader();
+    if (wantsHtmlRedirect(req)) return clearCookieAndRedirect(req);
     return NextResponse.json({ error: "Gagal logout", details: String(e) }, { status: 500 });
   }
 }
@@ -179,8 +230,17 @@ export async function GET(req: NextRequest) {
   const user = await getUserFromCookies();
 
   if (!user || user.role === "owner") {
-    cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
-    return NextResponse.redirect(new URL("/login", req.url));
+    clearCookieHeader();
+    // ensure redirect response also carries cleared cookie with path '/'
+    const res = NextResponse.redirect(new URL("/login", req.url), 302);
+    res.cookies.set(COOKIE_NAME, "", {
+      path: "/",
+      maxAge: 0,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+    return res;
   }
 
   const jakartaNow = getJakartaNow();
@@ -225,6 +285,14 @@ export async function GET(req: NextRequest) {
     console.error("[logout GET] error:", e);
   }
 
-  cookies().set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
-  return NextResponse.redirect(new URL("/login", req.url));
+  clearCookieHeader();
+  const resFinal = NextResponse.redirect(new URL("/login", req.url), 302);
+  resFinal.cookies.set(COOKIE_NAME, "", {
+    path: "/",
+    maxAge: 0,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+  return resFinal;
 }
